@@ -21,11 +21,15 @@
 
 Mounted directly inside Antigravity's composer footer to the left of the `Turbo` trigger — borderless, responsive, and automatically inheriting Light/Dark CSS tokens and Google Sans Flex typography:
 
-```text
-+  Orchestrator ...      🕒 18 轮 402 步 · 172 tok/s   🛢 38M tok · 缓存命中 87%   ◔ 22%   🛡 Turbo ⌄   🎙   ✨
-```
+<p align="center">
+  <img src="./docs/images/preview-bar.png" alt="Inline 3-segment HUD bar in Light and Dark Antigravity themes" width="900" />
+</p>
 
 Clicking any of the three segments opens a compact floating popover right above the composer:
+
+<p align="center">
+  <img src="./docs/images/preview-popovers.png" alt="Session Stats, Token Usage, and Context Window click popovers" width="900" />
+</p>
 
 - **Session Stats (`会话统计`)**: turns, steps, model wall time, deduplicated tool call wall time, average TTFT, and decode speed (`tok/s`).
 - **Token Usage (`Token 用量`)**: cumulative total tokens, cache hit rate, uncached input, cache read, and output tokens.
@@ -161,6 +165,8 @@ agy-ctx-ring/
 ├── plugin.json                # Antigravity plugin manifest
 ├── assets/
 │   └── logo.svg               # Plugin icon
+├── docs/
+│   └── images/                # README preview screenshots
 ├── sidecars/
 │   └── ctx_ring/
 │       ├── sidecar.json       # Headless sidecar configuration (has_web_ui: false)

@@ -21,11 +21,15 @@
 
 直接挂载在 Antigravity 输入框底栏 `Turbo` 权限按钮左侧——无边框、响应式自动缩写，字体（Google Sans Flex）与亮/暗主题颜色完全跟随原生界面：
 
-```text
-+  Orchestrator ...      🕒 18 轮 402 步 · 172 tok/s   🛢 38M tok · 缓存命中 87%   ◔ 22%   🛡 Turbo ⌄   🎙   ✨
-```
+<p align="center">
+  <img src="./docs/images/preview-bar.png" alt="亮色与暗色主题下的输入框三段底栏" width="900" />
+</p>
 
 点击任意分段即可在输入框上方弹出详情卡片：
+
+<p align="center">
+  <img src="./docs/images/preview-popovers.png" alt="会话统计、Token 用量与上下文窗口浮窗展示" width="900" />
+</p>
 
 - **会话统计**：轮次、步数、模型耗时、工具调用壁钟耗时（区间合并去重）、平均首字延迟（TTFT）、输出速度（`tok/s`）。
 - **Token 用量**：总用量、全局缓存命中率、未缓存输入、缓存读取与输出明细。
@@ -161,6 +165,8 @@ agy-ctx-ring/
 ├── plugin.json                # Antigravity 插件清单
 ├── assets/
 │   └── logo.svg               # 插件图标
+├── docs/
+│   └── images/                # README 效果预览截图
 ├── sidecars/
 │   └── ctx_ring/
 │       ├── sidecar.json       # 无头 Sidecar 配置 (has_web_ui: false)
