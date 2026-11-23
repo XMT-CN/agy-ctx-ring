@@ -541,10 +541,10 @@ function readDbRowsCached(conversationId) {
     if (modelName) latestModel = modelName;
     if (ctxCap > 0) latestLimitTokens = ctxCap;
 
-    if (ctxUsed > 0) {
-      latestUsedTokens = ctxUsed;
-    } else if (input + cacheRead > 0) {
+    if (input + cacheRead > 0) {
       latestUsedTokens = input + cacheRead;
+    } else if (ctxUsed > 0) {
+      latestUsedTokens = ctxUsed;
     }
     if (ctx[3] && ctx[3].length > 0) {
       latestCtx3Buf = ctx[3];

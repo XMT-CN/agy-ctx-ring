@@ -6,7 +6,7 @@
 
 **零侵入的 Antigravity 输入框底栏 HUD 与点击浮窗插件——实时展示会话统计、Token 用量与原生上下文 4 项精确构成。**
 
-[![Release](https://img.shields.io/badge/release-v1.2.6-d97706?style=flat-square)](https://github.com/XMT-CN/agy-ctx-ring/releases/latest)
+[![Release](https://img.shields.io/badge/release-v1.2.7-d97706?style=flat-square)](https://github.com/XMT-CN/agy-ctx-ring/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-16a34a?style=flat-square)](#工作原理与隐私说明)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-52525b?style=flat-square)](#一键安装)
@@ -36,7 +36,7 @@
 ## 核心特性
 
 - **不改 `app.asar`，版本升级不丢失**：绝不修改 `Antigravity.app` 或 `~/.gemini/config/config.json`，完全安装于标准插件目录 `~/.gemini/config/plugins/agy-ctx-ring/`，Antigravity 自动更新后无需重打补丁。
-- **原生精确上下文构成**：直接解析 `gen_metadata` 内嵌的原生 `ctx[3]` protobuf 统计树，彻底告别截断日志字符数粗估造成的数倍偏差。
+- **API 实测上下文用量 + 原生精确构成**：已用上下文优先取服务端返回的真实输入（未缓存输入 + 缓存读取，严格对齐 Antigravity 真实触发自动压缩的红线），并结合原生 `gen_metadata` 的 `ctx[3]` 统计树等比计算 4 项构成明细。
 - **会话切换零延迟**：
   - 连接后后台自动预加载最近 40 个会话的指标到前端内存缓存；
   - 结合 Chromium `window.navigation`（`currententrychange`）、`popstate` 与 `queueMicrotask` 监听，切换会话**同帧秒出**；
