@@ -1,0 +1,13 @@
+{
+  "command": "node",
+  "args": [
+    "main.mjs"
+  ],
+  "restart_policy": "always",
+  "display_name": "上下文胶囊",
+  "description": "Headless background service mounting a native-themed context ring pill and click-to-open popover in the Antigravity composer footer.",
+  "has_web_ui": false,
+  "agent_permissions": {
+    "allows_user_interactions": false
+  }
+}
