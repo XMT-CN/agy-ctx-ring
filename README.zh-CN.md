@@ -6,7 +6,7 @@
 
 **零侵入的 Antigravity 输入框底栏 HUD 与点击浮窗插件——实时展示会话统计、Token 用量与原生上下文 4 项精确构成。**
 
-[![Release](https://img.shields.io/badge/release-v1.2.7-d97706?style=flat-square)](https://github.com/XMT-CN/agy-ctx-ring/releases/latest)
+[![Release](https://img.shields.io/badge/release-v1.2.8-d97706?style=flat-square)](https://github.com/XMT-CN/agy-ctx-ring/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-16a34a?style=flat-square)](#工作原理与隐私说明)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-52525b?style=flat-square)](#一键安装)
@@ -33,14 +33,14 @@
 
 - **会话统计**：轮次、步数、模型耗时、工具调用壁钟耗时（区间合并去重）、平均首字延迟（TTFT）、输出速度（`tok/s`）。
 - **Token 用量**：总用量、全局缓存命中率、未缓存输入、缓存读取与输出明细。
-- **上下文窗口**：进度圆环与占用分级（`正常` / `占用偏高` / `接近上限`）、已用 / 剩余 / 窗口上限，以及直接解析自 Antigravity 原生 `gen_metadata` 的 **4 项构成明细**（系统提示与规则 · 工具调用与输出 · 模型思考与回复 · 用户输入）。
+- **上下文窗口**：进度圆环与占用分级（`正常` / `占用偏高` / `接近上限`）、压缩状态徽标（`已压缩`）、已用 / 剩余 / 窗口上限、本次缓存（含切模型冷启动提示），以及直接解析自 Antigravity 原生 `gen_metadata` 的 **5 项构成明细**（系统提示与规则 · 子智能体与系统消息 · 工具调用与输出 · 模型思考与回复 · 用户输入）。
 
 ---
 
 ## 核心特性
 
 - **不改 `app.asar`，版本升级不丢失**：绝不修改 `Antigravity.app` 或 `~/.gemini/config/config.json`，完全安装于标准插件目录 `~/.gemini/config/plugins/agy-ctx-ring/`，Antigravity 自动更新后无需重打补丁。
-- **API 实测上下文用量 + 原生精确构成**：已用上下文优先取服务端返回的真实输入（未缓存输入 + 缓存读取，严格对齐 Antigravity 真实触发自动压缩的红线），并结合原生 `gen_metadata` 的 `ctx[3]` 统计树等比计算 4 项构成明细。
+- **API 实测上下文用量 + 原生 5 项精确构成**：已用上下文优先取服务端返回的真实输入（未缓存输入 + 缓存读取，严格对齐 Antigravity 真实触发自动压缩的红线），结合原生 `gen_metadata` `ctx[3]` 统计树将**子智能体回传 / 计划交接 (`SYSTEM_MESSAGE`)** 从静态规则中独立拆出，避免误导（历史无 `ctx[3]` 会话兜底直读完整 `transcript_full.jsonl` 并按真实字符密度校准）。
 - **会话切换零延迟**：
   - 连接后后台自动预加载最近 40 个会话的指标到前端内存缓存；
   - 结合 Chromium `window.navigation`（`currententrychange`）、`popstate` 与 `queueMicrotask` 监听，切换会话**同帧秒出**；

@@ -22,12 +22,13 @@ const DEFAULT_LIMIT = 512000;
 
 const STEP_USER_INPUT = 14;
 const STEP_PLANNER_RESPONSE = 15;
+const STEP_CHECKPOINT = 23;
 const STEP_TOOL_GENERIC = 132;
 
 const TOP_WANT = new Set([1]);
 const META_WANT = new Set([4, 9, 11, 12, 19, 21]);
 const USAGE_WANT = new Set([2, 3, 5, 9, 10]);
-const CTX_PARENT_WANT = new Set([10]);
+const CTX_PARENT_WANT = new Set([1, 10]);
 const CTX_WANT = new Set([1, 3, 4]);
 const DUR_WANT = new Set([1, 2]);
 const STEP_TIME_WANT = new Set([1, 8, 32]);
@@ -251,10 +252,61 @@ export function resolveConversationId(preferredId = '') {
   return '';
 }
 
+function scaleBucketsToTotal(counts, targetTotal) {
+  const safe = counts.map((v) => Math.max(0, Number(v) || 0));
+  const rawSum = safe.reduce((acc, v) => acc + v, 0);
+  if (targetTotal <= 0) return safe.map(() => 0);
+  const goal = Math.round(targetTotal);
+  if (rawSum <= 0) {
+    const out = safe.map(() => 0);
+    out[0] = goal;
+    return out;
+  }
+  const scale = goal / rawSum;
+  const scaled = safe.map((v) => Math.round(v * scale));
+  let diff = goal - scaled.reduce((acc, v) => acc + v, 0);
+  if (diff > 0) {
+    let maxIdx = 0;
+    for (let i = 1; i < scaled.length; i++) {
+      if (scaled[i] > scaled[maxIdx]) maxIdx = i;
+    }
+    scaled[maxIdx] += diff;
+  } else if (diff < 0) {
+    let rem = -diff;
+    const order = scaled.map((_, i) => i).sort((a, b) => scaled[b] - scaled[a]);
+    for (const idx of order) {
+      if (rem <= 0) break;
+      const take = Math.min(rem, scaled[idx]);
+      scaled[idx] -= take;
+      rem -= take;
+    }
+  }
+  return scaled;
+}
+
+function buildBreakdownItems(tokensArr, usedTokens) {
+  const denom = usedTokens > 0 ? usedTokens : tokensArr.reduce((a, b) => a + b, 0);
+  const toPct = (v) => (denom > 0 ? (v / denom) * 100 : 0);
+  const defs = [
+    ['system', '系统提示与规则'],
+    ['injected', '子智能体与系统消息'],
+    ['tools', '工具调用与输出'],
+    ['model', '模型思考与回复'],
+    ['user', '用户输入'],
+  ];
+  return defs.map(([key, label], i) => ({
+    key,
+    label,
+    tokens: tokensArr[i] || 0,
+    pct: toPct(tokensArr[i] || 0),
+  }));
+}
+
 function decodeNativeBreakdown(ctx3Buf) {
   if (!ctx3Buf || ctx3Buf.length === 0) return null;
   const entries = readAllFields(ctx3Buf);
   let systemTok = 0;
+  let injectedTok = 0;
   let toolsTok = 0;
   let modelTok = 0;
   let userTok = 0;
@@ -299,7 +351,7 @@ function decodeNativeBreakdown(ctx3Buf) {
           stepName === 'ERROR_MESSAGE' ||
           stepName === 'EPHEMERAL_MESSAGE'
         ) {
-          systemTok += ctok;
+          injectedTok += ctok;
           if (stepName === 'CHECKPOINT') compacted = true;
         } else {
           toolsTok += ctok;
@@ -308,68 +360,50 @@ function decodeNativeBreakdown(ctx3Buf) {
       if (secTok > childrenSum) {
         const rem = secTok - childrenSum;
         if (childrenSum > 0) toolsTok += rem;
-        else systemTok += rem;
+        else injectedTok += rem;
       }
     } else {
       systemTok += secTok;
     }
   }
 
-  const total = systemTok + toolsTok + modelTok + userTok;
+  const total = systemTok + injectedTok + toolsTok + modelTok + userTok;
   if (total <= 0) return null;
-  return { total, systemTok, toolsTok, modelTok, userTok, compacted };
+  return { total, systemTok, injectedTok, toolsTok, modelTok, userTok, compacted };
 }
 
 function formatNativeBreakdown(native, usedTokens) {
-  let { systemTok, toolsTok, modelTok, userTok, total, compacted } = native;
-  if (usedTokens > 0 && total > 0 && total !== usedTokens) {
-    const scale = usedTokens / total;
-    systemTok = Math.round(systemTok * scale);
-    toolsTok = Math.round(toolsTok * scale);
-    modelTok = Math.round(modelTok * scale);
-    userTok = Math.round(userTok * scale);
-    const diff = usedTokens - (systemTok + toolsTok + modelTok + userTok);
-    if (diff !== 0) {
-      if (systemTok >= toolsTok && systemTok >= modelTok && systemTok >= userTok) systemTok += diff;
-      else if (toolsTok >= modelTok && toolsTok >= userTok) toolsTok += diff;
-      else if (modelTok >= userTok) modelTok += diff;
-      else userTok += diff;
-    }
-  }
-  const denom = usedTokens > 0 ? usedTokens : systemTok + toolsTok + modelTok + userTok;
-  const toPct = (v) => (denom > 0 ? (v / denom) * 100 : 0);
+  const scaled = scaleBucketsToTotal(
+    [native.systemTok, native.injectedTok, native.toolsTok, native.modelTok, native.userTok],
+    usedTokens
+  );
   return {
-    compacted: Boolean(compacted),
-    items: [
-      { key: 'system', label: '系统提示与规则', tokens: systemTok, pct: toPct(systemTok) },
-      { key: 'tools', label: '工具调用与输出', tokens: toolsTok, pct: toPct(toolsTok) },
-      { key: 'model', label: '模型思考与回复', tokens: modelTok, pct: toPct(modelTok) },
-      { key: 'user', label: '用户输入', tokens: userTok, pct: toPct(userTok) },
-    ],
+    compacted: Boolean(native.compacted),
+    items: buildBreakdownItems(scaled, usedTokens),
   };
 }
 
-function readTranscriptBreakdown(conversationId, usedTokens) {
+export function readTranscriptBreakdown(conversationId, usedTokens, hints = {}) {
   const empty = {
     compacted: false,
-    items: [
-      { key: 'system', label: '系统提示与规则', tokens: usedTokens, pct: usedTokens > 0 ? 100 : 0 },
-      { key: 'tools', label: '工具调用与输出', tokens: 0, pct: 0 },
-      { key: 'model', label: '模型思考与回复', tokens: 0, pct: 0 },
-      { key: 'user', label: '用户输入', tokens: 0, pct: 0 },
-    ],
+    items: buildBreakdownItems([usedTokens, 0, 0, 0, 0], usedTokens),
   };
 
   if (!conversationId || !ID_RE.test(conversationId)) return empty;
-  const logPath = join(BRAIN_DIR, conversationId, '.system_generated', 'logs', 'transcript.jsonl');
+  const logsDir = join(BRAIN_DIR, conversationId, '.system_generated', 'logs');
+  const fullPath = join(logsDir, 'transcript_full.jsonl');
+  const compactPath = join(logsDir, 'transcript.jsonl');
+  const logPath = existsSync(fullPath) ? fullPath : compactPath;
   const st = statSafe(logPath);
   if (!st) return empty;
 
   const cacheKey = `${logPath}:${st.mtimeMs}:${st.size}`;
   let parsed = transcriptCache.get(logPath);
   if (!parsed || parsed.key !== cacheKey) {
+    let injectedChars = 0;
     let toolsChars = 0;
-    let modelChars = 0;
+    let replyChars = 0;
+    let thinkingChars = 0;
     let userChars = 0;
     let compacted = false;
 
@@ -385,32 +419,35 @@ function readTranscriptBreakdown(conversationId, usedTokens) {
           continue;
         }
         const t = obj.type;
+        const contentLen = typeof obj.content === 'string' ? obj.content.length : 0;
         if (t === 'CHECKPOINT') {
           toolsChars = 0;
-          modelChars = 0;
+          replyChars = 0;
+          thinkingChars = 0;
           userChars = 0;
+          injectedChars = contentLen;
           compacted = true;
           continue;
         }
         if (t === 'USER_INPUT') {
-          userChars += typeof obj.content === 'string' ? obj.content.length : 0;
+          userChars += contentLen;
         } else if (t === 'PLANNER_RESPONSE') {
-          compacted = false;
-          modelChars +=
-            (typeof obj.content === 'string' ? obj.content.length : 0) +
-            (typeof obj.thinking === 'string' ? obj.thinking.length : 0);
+          replyChars += contentLen;
+          thinkingChars += typeof obj.thinking === 'string' ? obj.thinking.length : 0;
           if (Array.isArray(obj.tool_calls) && obj.tool_calls.length > 0) {
             try {
               toolsChars += JSON.stringify(obj.tool_calls).length;
             } catch {}
           }
+        } else if (t === 'SYSTEM_MESSAGE' || t === 'ERROR_MESSAGE' || t === 'EPHEMERAL_MESSAGE') {
+          injectedChars += contentLen;
         } else {
-          toolsChars += typeof obj.content === 'string' ? obj.content.length : 0;
+          toolsChars += contentLen;
         }
       }
     } catch {}
 
-    parsed = { key: cacheKey, toolsChars, modelChars, userChars, compacted };
+    parsed = { key: cacheKey, injectedChars, toolsChars, replyChars, thinkingChars, userChars, compacted };
     transcriptCache.set(logPath, parsed);
     if (transcriptCache.size > 128) {
       const oldest = transcriptCache.keys().next().value;
@@ -422,46 +459,24 @@ function readTranscriptBreakdown(conversationId, usedTokens) {
     return { ...empty, compacted: parsed.compacted };
   }
 
-  const CHARS_PER_TOKEN = 3.6;
+  const CHARS_PER_TOKEN = 2.4;
+  const injectedEst = Math.round(parsed.injectedChars / CHARS_PER_TOKEN);
   const toolsEst = Math.round(parsed.toolsChars / CHARS_PER_TOKEN);
-  const modelEst = Math.round(parsed.modelChars / CHARS_PER_TOKEN);
+  const replyEst = Math.round(parsed.replyChars / CHARS_PER_TOKEN);
+  const thinkingLogEst = Math.round(parsed.thinkingChars / CHARS_PER_TOKEN);
+  const thinkingApi = Math.max(0, Number(hints.thinkingSinceCompaction) || 0);
+  const modelEst = replyEst + Math.max(thinkingLogEst, thinkingApi);
   const userEst = Math.round(parsed.userChars / CHARS_PER_TOKEN);
-  const otherSum = toolsEst + modelEst + userEst;
 
-  let systemTok;
-  let toolsTok;
-  let modelTok;
-  let userTok;
+  const rawHeader = Number(hints.initialHeaderTokens);
+  const baseline = Number.isFinite(rawHeader) && rawHeader > 0 ? rawHeader : 30000;
+  const otherSum = injectedEst + toolsEst + modelEst + userEst;
+  const systemEst = otherSum > 0 ? Math.min(usedTokens, Math.max(0, baseline)) : usedTokens;
 
-  if (otherSum <= Math.floor(usedTokens * 0.88)) {
-    toolsTok = toolsEst;
-    modelTok = modelEst;
-    userTok = userEst;
-    systemTok = Math.max(0, usedTokens - otherSum);
-  } else {
-    systemTok = Math.round(usedTokens * 0.12);
-    const budget = Math.max(0, usedTokens - systemTok);
-    const scale = otherSum > 0 ? budget / otherSum : 0;
-    toolsTok = Math.round(toolsEst * scale);
-    modelTok = Math.round(modelEst * scale);
-    userTok = Math.round(userEst * scale);
-    const diff = usedTokens - (systemTok + toolsTok + modelTok + userTok);
-    if (diff !== 0) {
-      if (toolsTok >= modelTok && toolsTok >= userTok) toolsTok += diff;
-      else if (modelTok >= userTok) modelTok += diff;
-      else systemTok += diff;
-    }
-  }
-
-  const toPct = (v) => (usedTokens > 0 ? (v / usedTokens) * 100 : 0);
+  const scaled = scaleBucketsToTotal([systemEst, injectedEst, toolsEst, modelEst, userEst], usedTokens);
   return {
     compacted: parsed.compacted,
-    items: [
-      { key: 'system', label: '系统提示与规则', tokens: systemTok, pct: toPct(systemTok) },
-      { key: 'tools', label: '工具调用与输出', tokens: toolsTok, pct: toPct(toolsTok) },
-      { key: 'model', label: '模型思考与回复', tokens: modelTok, pct: toPct(modelTok) },
-      { key: 'user', label: '用户输入', tokens: userTok, pct: toPct(userTok) },
-    ],
+    items: buildBreakdownItems(scaled, usedTokens),
   };
 }
 
@@ -503,6 +518,13 @@ function readDbRowsCached(conversationId) {
   let latestInput = 0;
   let latestCacheRead = 0;
   let latestCtx3Buf = null;
+  let firstHeaderTokens = 0;
+  let lastCpStart = 0;
+  let compactedCount = 0;
+  let thinkingSinceCompaction = 0;
+  let prevReqModel = '';
+  let lastCacheColdStart = false;
+  let lastCacheColdReason = '';
 
   let totalUncachedInput = 0;
   let totalCacheRead = 0;
@@ -530,8 +552,10 @@ function readDbRowsCached(conversationId) {
     const input = Number(u[2] || 0);
     const output = Number(u[3] || 0);
     const cacheRead = Number(u[5] || 0);
+    const thinkingOut = Number(u[9] || 0);
     const ctxUsed = Number(ctx[1] || 0);
     const ctxCap = Number(ctx[4] || 0);
+    const cpStart = Number(c9[1] || 0);
 
     const ttft = m[11] ? decodeDuration(m[11]) : null;
     const streaming = m[12] ? decodeDuration(m[12]) : null;
@@ -540,6 +564,16 @@ function readDbRowsCached(conversationId) {
 
     if (modelName) latestModel = modelName;
     if (ctxCap > 0) latestLimitTokens = ctxCap;
+
+    if (!firstHeaderTokens && (ctxUsed > 0 || input + cacheRead > 0)) {
+      firstHeaderTokens = ctxUsed > 0 ? ctxUsed : input + cacheRead;
+    }
+    if (cpStart > lastCpStart) {
+      compactedCount += 1;
+      lastCpStart = cpStart;
+      thinkingSinceCompaction = 0;
+    }
+    thinkingSinceCompaction += thinkingOut;
 
     if (input + cacheRead > 0) {
       latestUsedTokens = input + cacheRead;
@@ -557,6 +591,15 @@ function readDbRowsCached(conversationId) {
     }
 
     if (input + cacheRead > 0) {
+      if (cacheRead === 0 && requestCount > 0) {
+        lastCacheColdStart = true;
+        lastCacheColdReason =
+          prevReqModel && modelName && prevReqModel !== modelName ? 'model_switch' : 'cold_start';
+      } else {
+        lastCacheColdStart = false;
+        lastCacheColdReason = '';
+      }
+      if (modelName) prevReqModel = modelName;
       latestInput = input;
       latestCacheRead = cacheRead;
       requestCount += 1;
@@ -587,6 +630,7 @@ function readDbRowsCached(conversationId) {
   let turns = 0;
   let plannerSteps = 0;
   let toolSteps = 0;
+  let checkpointSteps = 0;
   const toolIntervals = [];
 
   for (const s of stepRows) {
@@ -594,6 +638,8 @@ function readDbRowsCached(conversationId) {
       turns += 1;
     } else if (s.step_type === STEP_PLANNER_RESPONSE) {
       plannerSteps += 1;
+    } else if (s.step_type === STEP_CHECKPOINT) {
+      checkpointSteps += 1;
     } else if (s.step_type === STEP_TOOL_GENERIC) {
       toolSteps += 1;
       if (s.metadata) {
@@ -606,6 +652,7 @@ function readDbRowsCached(conversationId) {
       }
     }
   }
+  compactedCount = Math.max(compactedCount, checkpointSteps);
 
   const steps = plannerSteps + toolSteps;
   const toolTimeSec = sumMergedIntervals(toolIntervals);
@@ -650,6 +697,11 @@ function readDbRowsCached(conversationId) {
     cumCachePct,
     requestCount,
     nativeBreakdown,
+    firstHeaderTokens,
+    thinkingSinceCompaction,
+    compactedCount,
+    lastCacheColdStart,
+    lastCacheColdReason,
   };
 
   dbCache.set(dbPath, { sig: cacheSig, data });
@@ -675,7 +727,12 @@ export function readConversationMetrics(conversationId, { fallbackToRecent = fal
   const breakdown =
     raw?.nativeBreakdown && usedTokens > 0
       ? formatNativeBreakdown(raw.nativeBreakdown, usedTokens)
-      : readTranscriptBreakdown(resolvedId, usedTokens);
+      : readTranscriptBreakdown(resolvedId, usedTokens, {
+          initialHeaderTokens: raw?.firstHeaderTokens,
+          thinkingSinceCompaction: raw?.thinkingSinceCompaction,
+        });
+  const compacted = Boolean((raw?.compactedCount || 0) > 0 || breakdown.compacted);
+  const compactedCount = raw?.compactedCount || (breakdown.compacted ? 1 : 0);
 
   return {
     conversationId: resolvedId,
@@ -701,10 +758,13 @@ export function readConversationMetrics(conversationId, { fallbackToRecent = fal
     totalOutput: raw?.totalOutput || 0,
     lastCacheTokens: raw?.lastCacheTokens || 0,
     lastCachePct: raw?.lastCachePct ?? null,
+    lastCacheColdStart: Boolean(raw?.lastCacheColdStart),
+    lastCacheColdReason: raw?.lastCacheColdReason || '',
     cumCacheTokens: raw?.cumCacheTokens || 0,
     cumCachePct: raw?.cumCachePct ?? null,
     requestCount: raw?.requestCount || 0,
-    compacted: breakdown.compacted,
+    compacted,
+    compactedCount,
     breakdown: breakdown.items,
     updatedAt: Date.now(),
   };

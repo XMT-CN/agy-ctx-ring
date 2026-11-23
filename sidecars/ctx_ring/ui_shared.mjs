@@ -314,15 +314,29 @@ const BAR_AND_POP_CSS = `
   margin-left: 4px;
   font-weight: 350;
 }
-#agy-ctx-ring-pop .acr-c-system { background: var(--color-blue-500, #4380b4); }
-#agy-ctx-ring-pop .acr-c-tools  { background: var(--color-orange-500, #e0712f); }
-#agy-ctx-ring-pop .acr-c-model  { background: var(--color-violet-500, #bb84cc); }
-#agy-ctx-ring-pop .acr-c-user   { background: var(--color-green-500, #63984f); }
+#agy-ctx-ring-pop .acr-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1.5px 6px;
+  border-radius: 9999px;
+  font-size: 10.5px;
+  font-weight: 400;
+  line-height: 1.25;
+  color: var(--muted-foreground, #71717a);
+  background: var(--muted, rgba(128, 128, 128, 0.08));
+  border: 1px solid var(--border, rgba(128, 128, 128, 0.14));
+  white-space: nowrap;
+}
+#agy-ctx-ring-pop .acr-c-system   { background: var(--color-blue-500, #4380b4); }
+#agy-ctx-ring-pop .acr-c-injected { background: var(--color-teal-500, #14b8a6); }
+#agy-ctx-ring-pop .acr-c-tools    { background: var(--color-orange-500, #e0712f); }
+#agy-ctx-ring-pop .acr-c-model    { background: var(--color-violet-500, #bb84cc); }
+#agy-ctx-ring-pop .acr-c-user     { background: var(--color-green-500, #63984f); }
 `;
 
 export function buildInjectedScript() {
   return `(function () {
-  var VERSION = '1.2.7';
+  var VERSION = '1.2.8';
   if (window.__agyCtxRing && window.__agyCtxRing.version === VERSION) {
     return { status: 'already_mounted', version: VERSION };
   }
@@ -404,7 +418,10 @@ export function buildInjectedScript() {
     return Math.round(s) + ' 秒';
   }
 
-  function fmtCache(pct, tokens) {
+  function fmtCache(pct, tokens, coldStart, coldReason) {
+    if (coldStart && (!Number.isFinite(tokens) || tokens <= 0)) {
+      return coldReason === 'model_switch' ? '切模型冷启动 · 0' : '冷启动 · 0';
+    }
     if (!Number.isFinite(pct) || pct < 0) return '—';
     return pct.toFixed(1) + '% · ' + fmtTokens(tokens);
   }
@@ -481,10 +498,15 @@ export function buildInjectedScript() {
       '</div>';
     }).join('');
 
+    var compChip = data.compacted
+      ? '<span class="acr-chip" title="本会话已触发上下文压缩">' + (data.compactedCount > 1 ? ('已压缩 ×' + data.compactedCount) : '已压缩') + '</span>'
+      : '';
+
     return '' +
       '<div class="acr-head">' +
         '<div class="acr-head-left">' +
           '<span class="acr-title">上下文窗口</span>' +
+          compChip +
         '</div>' +
         '<span class="acr-badge" data-tier="' + escHtml(tierId) + '">' + escHtml(tier.label || '正常') + '</span>' +
       '</div>' +
@@ -514,7 +536,7 @@ export function buildInjectedScript() {
       '<div class="acr-divider"></div>' +
       '<div class="acr-rows">' +
         '<div class="acr-kv"><span class="acr-k">采样模型</span><span class="acr-v" title="' + escHtml(data.model) + '">' + escHtml(data.model || '—') + '</span></div>' +
-        '<div class="acr-kv"><span class="acr-k">本次缓存</span><span class="acr-v">' + fmtCache(data.lastCachePct, data.lastCacheTokens) + '</span></div>' +
+        '<div class="acr-kv"><span class="acr-k">本次缓存</span><span class="acr-v">' + fmtCache(data.lastCachePct, data.lastCacheTokens, data.lastCacheColdStart, data.lastCacheColdReason) + '</span></div>' +
       '</div>';
   }
 
@@ -561,12 +583,16 @@ export function buildInjectedScript() {
     totalOutput: 0,
     lastCacheTokens: 0,
     lastCachePct: null,
+    lastCacheColdStart: false,
+    lastCacheColdReason: '',
     cumCacheTokens: 0,
     cumCachePct: null,
     requestCount: 0,
     compacted: false,
+    compactedCount: 0,
     breakdown: [
       { key: 'system', label: '系统提示与规则', tokens: 0, pct: 0 },
+      { key: 'injected', label: '子智能体与系统消息', tokens: 0, pct: 0 },
       { key: 'tools', label: '工具调用与输出', tokens: 0, pct: 0 },
       { key: 'model', label: '模型思考与回复', tokens: 0, pct: 0 },
       { key: 'user', label: '用户输入', tokens: 0, pct: 0 },

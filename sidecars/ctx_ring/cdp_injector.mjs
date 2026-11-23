@@ -292,6 +292,8 @@ export function startCdpInjector({ readMetrics, readRecentMetrics }) {
         lc: metrics.lastCacheTokens,
         cc: metrics.cumCacheTokens,
         r: metrics.requestCount,
+        cp: metrics.compactedCount || 0,
+        cs: metrics.lastCacheColdReason || '',
         b: Array.isArray(metrics.breakdown) ? metrics.breakdown.map((x) => x.tokens) : [],
       });
 
