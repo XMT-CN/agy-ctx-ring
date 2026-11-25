@@ -336,7 +336,7 @@ const BAR_AND_POP_CSS = `
 
 export function buildInjectedScript() {
   return `(function () {
-  var VERSION = '1.2.8';
+  var VERSION = '1.2.9';
   if (window.__agyCtxRing && window.__agyCtxRing.version === VERSION) {
     return { status: 'already_mounted', version: VERSION };
   }
@@ -449,6 +449,14 @@ export function buildInjectedScript() {
 
   function renderTokensPop(data) {
     var hitStr = Number.isFinite(data.cumCachePct) ? Math.round(data.cumCachePct) + '%' : '—';
+    var hasSub = (data.subagentCount > 0 || data.subagentTotalTokens > 0);
+    var subHtml = hasSub
+      ? '<div class="acr-divider"></div>' +
+        '<div class="acr-rows">' +
+          '<div class="acr-kv"><span class="acr-k">主会话</span><span class="acr-v">' + fmtTokens(data.mainTotalTokens) + ' · ' + fmtInt(data.mainRequestCount) + ' 次</span></div>' +
+          '<div class="acr-kv"><span class="acr-k">子代理 (' + fmtInt(data.subagentCount) + ')</span><span class="acr-v">' + fmtTokens(data.subagentTotalTokens) + ' · ' + fmtInt(data.subagentRequestCount) + ' 次</span></div>' +
+        '</div>'
+      : '';
     return '' +
       '<div class="acr-head">' +
         '<div class="acr-head-left">' +
@@ -463,7 +471,8 @@ export function buildInjectedScript() {
         '<div class="acr-kv"><span class="acr-k">未缓存输入</span><span class="acr-v">' + fmtInt(data.totalUncachedInput) + ' tok</span></div>' +
         '<div class="acr-kv"><span class="acr-k">缓存读取</span><span class="acr-v">' + fmtInt(data.totalCacheRead) + ' tok</span></div>' +
         '<div class="acr-kv"><span class="acr-k">输出</span><span class="acr-v">' + fmtInt(data.totalOutput) + ' tok</span></div>' +
-      '</div>';
+      '</div>' +
+      subHtml;
   }
 
   function renderContextPop(data) {
@@ -581,6 +590,11 @@ export function buildInjectedScript() {
     totalUncachedInput: 0,
     totalCacheRead: 0,
     totalOutput: 0,
+    mainTotalTokens: 0,
+    mainRequestCount: 0,
+    subagentCount: 0,
+    subagentTotalTokens: 0,
+    subagentRequestCount: 0,
     lastCacheTokens: 0,
     lastCachePct: null,
     lastCacheColdStart: false,

@@ -1,7 +1,7 @@
 {
   "name": "agy-ctx-ring",
   "displayName": "上下文胶囊",
-  "version": "1.2.8",
+  "version": "1.2.9",
   "description": "DSH 风格极简无边框三段底栏与点击浮窗（会话统计 / Token 用量 / 上下文窗口），零侵入不改 app.asar、升级不丢失、自动跟随 Antigravity 主题。",
   "logo": "assets/logo.svg",
   "author": {

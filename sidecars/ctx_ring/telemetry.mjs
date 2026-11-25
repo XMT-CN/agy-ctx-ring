@@ -7,6 +7,7 @@
  * from `transcript.jsonl`.
  */
 
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -35,6 +36,7 @@ const STEP_TIME_WANT = new Set([1, 8, 32]);
 
 const dbCache = new Map();
 const transcriptCache = new Map();
+const summaryGraphCache = { sig: '', childrenByParent: new Map() };
 
 /**
  * Fast wire-level protobuf field scanner that skips unneeded length-delimited blobs
@@ -197,6 +199,95 @@ function statSafe(p) {
   } catch {
     return null;
   }
+}
+
+function addChildEdge(childrenByParent, parentId, childId) {
+  const p = typeof parentId === 'string' ? parentId.trim() : '';
+  const c = typeof childId === 'string' ? childId.trim() : '';
+  if (!p || !c || p === c || !ID_RE.test(p) || !ID_RE.test(c)) return;
+  let set = childrenByParent.get(p);
+  if (!set) {
+    set = new Set();
+    childrenByParent.set(p, set);
+  }
+  set.add(c);
+}
+
+function readChildrenGraphCached() {
+  const st = statSafe(SUMMARIES_DB);
+  if (!st) return new Map();
+  const walSt = statSafe(`${SUMMARIES_DB}-wal`);
+  const sig = `${st.mtimeMs}:${st.size}:${walSt ? `${walSt.mtimeMs}:${walSt.size}` : '0'}`;
+  if (summaryGraphCache.sig === sig) {
+    return summaryGraphCache.childrenByParent;
+  }
+
+  const childrenByParent = new Map();
+  let db;
+  try {
+    db = new DatabaseSync(SUMMARIES_DB, { readOnly: true });
+    try {
+      const rows = db
+        .prepare(
+          "SELECT conversation_id, parent_conversation_id FROM conversation_summaries WHERE parent_conversation_id IS NOT NULL AND parent_conversation_id != ''"
+        )
+        .all();
+      for (const r of rows) {
+        addChildEdge(childrenByParent, r.parent_conversation_id, r.conversation_id);
+      }
+    } catch {}
+    try {
+      const parentRows = db
+        .prepare('SELECT conversation_id, parent_id FROM conversation_parents')
+        .all();
+      for (const r of parentRows) {
+        addChildEdge(childrenByParent, r.parent_id, r.conversation_id);
+      }
+    } catch {}
+    summaryGraphCache.sig = sig;
+    summaryGraphCache.childrenByParent = childrenByParent;
+  } catch {
+    return summaryGraphCache.childrenByParent;
+  } finally {
+    try {
+      db?.close();
+    } catch {}
+  }
+  return childrenByParent;
+}
+
+function getDescendantConversationIds(rootId) {
+  if (!rootId || !ID_RE.test(rootId)) return [];
+  const childrenByParent = readChildrenGraphCached();
+  const visited = new Set([rootId]);
+  const queue = [rootId];
+  const descendants = [];
+
+  while (queue.length > 0) {
+    const cur = queue.shift();
+    const children = childrenByParent.get(cur);
+    if (!children) continue;
+    for (const cid of children) {
+      if (visited.has(cid)) continue;
+      visited.add(cid);
+      queue.push(cid);
+      const st = statSafe(join(CONVERSATIONS_DIR, `${cid}.db`));
+      if (st) {
+        descendants.push({
+          id: cid,
+          birthtimeMs: Number.isFinite(st.birthtimeMs) ? st.birthtimeMs : Number.MAX_SAFE_INTEGER,
+          mtimeMs: Number.isFinite(st.mtimeMs) ? st.mtimeMs : Number.MAX_SAFE_INTEGER,
+        });
+      }
+    }
+  }
+
+  descendants.sort((a, b) => {
+    if (a.birthtimeMs !== b.birthtimeMs) return a.birthtimeMs - b.birthtimeMs;
+    if (a.mtimeMs !== b.mtimeMs) return a.mtimeMs - b.mtimeMs;
+    return a.id.localeCompare(b.id);
+  });
+  return descendants.map((d) => d.id);
 }
 
 export function listRecentConversations(limit = 10) {
@@ -529,6 +620,7 @@ function readDbRowsCached(conversationId) {
   let totalUncachedInput = 0;
   let totalCacheRead = 0;
   let totalOutput = 0;
+  const calls = [];
 
   let modelTimeSec = 0;
   let sumTtft = 0;
@@ -588,6 +680,17 @@ function readDbRowsCached(conversationId) {
       totalUncachedInput += input;
       totalCacheRead += cacheRead;
       totalOutput += output;
+      const blobHash =
+        r.data && r.data.length > 0
+          ? createHash('sha256').update(r.data).digest('hex')
+          : '';
+      calls.push({
+        blobHash,
+        input,
+        cacheRead,
+        output,
+        hasInput: input + cacheRead > 0,
+      });
     }
 
     if (input + cacheRead > 0) {
@@ -702,10 +805,11 @@ function readDbRowsCached(conversationId) {
     compactedCount,
     lastCacheColdStart,
     lastCacheColdReason,
+    calls,
   };
 
   dbCache.set(dbPath, { sig: cacheSig, data });
-  if (dbCache.size > 128) {
+  if (dbCache.size > 256) {
     const oldest = dbCache.keys().next().value;
     dbCache.delete(oldest);
   }
@@ -718,6 +822,64 @@ export function readConversationMetrics(conversationId, { fallbackToRecent = fal
     ? resolveConversationId(clean)
     : (ID_RE.test(clean) ? clean : '');
   const raw = resolvedId ? readDbRowsCached(resolvedId) : null;
+
+  const mainUncached = raw?.totalUncachedInput || 0;
+  const mainCacheRead = raw?.totalCacheRead || 0;
+  const mainOutput = raw?.totalOutput || 0;
+  const mainTotalTokens = raw?.totalTokens || 0;
+  const mainRequestCount = raw?.requestCount || 0;
+
+  let subagentCount = 0;
+  let subagentUncached = 0;
+  let subagentCacheRead = 0;
+  let subagentOutput = 0;
+  let subagentRequestCount = 0;
+
+  if (resolvedId && raw) {
+    const seenHashes = new Set();
+    for (const c of raw.calls || []) {
+      if (c.blobHash) seenHashes.add(c.blobHash);
+    }
+
+    const descendantIds = getDescendantConversationIds(resolvedId);
+    for (const childId of descendantIds) {
+      const childRaw = readDbRowsCached(childId);
+      if (!childRaw || !Array.isArray(childRaw.calls) || childRaw.calls.length === 0) continue;
+
+      let cUn = 0;
+      let cCache = 0;
+      let cOut = 0;
+      let cReqs = 0;
+      const childHashes = [];
+
+      for (const c of childRaw.calls) {
+        if (c.blobHash && seenHashes.has(c.blobHash)) continue;
+        if (c.blobHash) childHashes.push(c.blobHash);
+        cUn += c.input;
+        cCache += c.cacheRead;
+        cOut += c.output;
+        if (c.hasInput) cReqs += 1;
+      }
+
+      if (cUn + cCache + cOut > 0) {
+        subagentCount += 1;
+        subagentUncached += cUn;
+        subagentCacheRead += cCache;
+        subagentOutput += cOut;
+        subagentRequestCount += cReqs;
+        for (const h of childHashes) seenHashes.add(h);
+      }
+    }
+  }
+
+  const totalUncachedInput = mainUncached + subagentUncached;
+  const totalCacheRead = mainCacheRead + subagentCacheRead;
+  const totalOutput = mainOutput + subagentOutput;
+  const totalTokens = totalUncachedInput + totalCacheRead + totalOutput;
+  const subagentTotalTokens = subagentUncached + subagentCacheRead + subagentOutput;
+  const cumTotalIn = totalUncachedInput + totalCacheRead;
+  const cumCachePct = cumTotalIn > 0 ? (totalCacheRead / cumTotalIn) * 100 : null;
+  const requestCount = mainRequestCount + subagentRequestCount;
 
   const usedTokens = raw?.usedTokens || 0;
   const limitTokens = raw?.limitTokens || DEFAULT_LIMIT;
@@ -752,17 +914,22 @@ export function readConversationMetrics(conversationId, { fallbackToRecent = fal
     turns: raw?.turns || 0,
     steps: raw?.steps || 0,
     toolSteps: raw?.toolSteps || 0,
-    totalTokens: raw?.totalTokens || 0,
-    totalUncachedInput: raw?.totalUncachedInput || 0,
-    totalCacheRead: raw?.totalCacheRead || 0,
-    totalOutput: raw?.totalOutput || 0,
+    totalTokens,
+    totalUncachedInput,
+    totalCacheRead,
+    totalOutput,
+    mainTotalTokens,
+    mainRequestCount,
+    subagentCount,
+    subagentTotalTokens,
+    subagentRequestCount,
     lastCacheTokens: raw?.lastCacheTokens || 0,
     lastCachePct: raw?.lastCachePct ?? null,
     lastCacheColdStart: Boolean(raw?.lastCacheColdStart),
     lastCacheColdReason: raw?.lastCacheColdReason || '',
-    cumCacheTokens: raw?.cumCacheTokens || 0,
-    cumCachePct: raw?.cumCachePct ?? null,
-    requestCount: raw?.requestCount || 0,
+    cumCacheTokens: totalCacheRead,
+    cumCachePct,
+    requestCount,
     compacted,
     compactedCount,
     breakdown: breakdown.items,
