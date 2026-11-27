@@ -4,7 +4,7 @@
  */
 
 const BAR_AND_POP_CSS = `
-#agy-ctx-ring-bar {
+.agy-ctx-ring-bar {
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -15,10 +15,10 @@ const BAR_AND_POP_CSS = `
   font-variant-numeric: tabular-nums;
   user-select: none;
 }
-#agy-ctx-ring-bar * {
+.agy-ctx-ring-bar * {
   box-sizing: border-box;
 }
-#agy-ctx-ring-bar .acr-seg-btn {
+.agy-ctx-ring-bar .acr-seg-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -39,41 +39,41 @@ const BAR_AND_POP_CSS = `
   cursor: pointer;
   transition: background 0.14s ease, color 0.14s ease;
 }
-#agy-ctx-ring-bar .acr-seg-btn:hover,
-#agy-ctx-ring-bar .acr-seg-btn[data-open="true"] {
+.agy-ctx-ring-bar .acr-seg-btn:hover,
+.agy-ctx-ring-bar .acr-seg-btn[data-open="true"] {
   background: var(--secondary, rgba(10, 10, 12, 0.06));
   color: var(--foreground, #0a0a0c);
 }
-#agy-ctx-ring-bar .acr-ico {
+.agy-ctx-ring-bar .acr-ico {
   width: 14px;
   height: 14px;
   flex: none;
   display: block;
 }
-#agy-ctx-ring-bar .acr-bar-track {
+.agy-ctx-ring-bar .acr-bar-track {
   stroke: color-mix(in srgb, var(--foreground, currentColor) 14%, transparent);
 }
-#agy-ctx-ring-bar .acr-bar-arc {
+.agy-ctx-ring-bar .acr-bar-arc {
   transition: stroke-dasharray 0.35s ease, stroke 0.25s ease;
 }
-#agy-ctx-ring-bar .acr-bar-arc[data-tier="ok"] {
+.agy-ctx-ring-bar .acr-bar-arc[data-tier="ok"] {
   stroke: var(--muted-foreground, #71717a);
 }
-#agy-ctx-ring-bar .acr-seg-btn:hover .acr-bar-arc[data-tier="ok"],
-#agy-ctx-ring-bar .acr-seg-btn[data-open="true"] .acr-bar-arc[data-tier="ok"] {
+.agy-ctx-ring-bar .acr-seg-btn:hover .acr-bar-arc[data-tier="ok"],
+.agy-ctx-ring-bar .acr-seg-btn[data-open="true"] .acr-bar-arc[data-tier="ok"] {
   stroke: var(--success, var(--color-green-500, #58983f));
 }
-#agy-ctx-ring-bar .acr-bar-arc[data-tier="warn"] {
+.agy-ctx-ring-bar .acr-bar-arc[data-tier="warn"] {
   stroke: var(--color-amber-500, #e59400);
 }
-#agy-ctx-ring-bar .acr-bar-arc[data-tier="crit"] {
+.agy-ctx-ring-bar .acr-bar-arc[data-tier="crit"] {
   stroke: var(--error, var(--color-red-500, #de5555));
 }
-#agy-ctx-ring-bar[data-compact="md"] .acr-seg-btn[data-panel="tokens"] {
+.agy-ctx-ring-bar[data-compact="md"] .acr-seg-btn[data-panel="tokens"] {
   display: none;
 }
-#agy-ctx-ring-bar[data-compact="sm"] .acr-seg-btn[data-panel="tokens"],
-#agy-ctx-ring-bar[data-compact="sm"] .acr-seg-btn[data-panel="session"] {
+.agy-ctx-ring-bar[data-compact="sm"] .acr-seg-btn[data-panel="tokens"],
+.agy-ctx-ring-bar[data-compact="sm"] .acr-seg-btn[data-panel="session"] {
   display: none;
 }
 
@@ -85,6 +85,8 @@ const BAR_AND_POP_CSS = `
   box-sizing: border-box;
   width: 296px;
   max-width: calc(100vw - 20px);
+  max-height: calc(100vh - 20px);
+  overflow-y: auto;
   background: var(--onyx-raised, var(--card, var(--background, #ffffff)));
   border: 1px solid var(--card-border, var(--border, rgba(128, 128, 128, 0.18)));
   border-radius: var(--radius-2xl, 14px);
@@ -336,15 +338,17 @@ const BAR_AND_POP_CSS = `
 
 export function buildInjectedScript() {
   return `(function () {
-  var VERSION = '1.2.9';
+  var VERSION = '1.2.10';
   if (window.__agyCtxRing && window.__agyCtxRing.version === VERSION) {
     return { status: 'already_mounted', version: VERSION };
   }
   if (window.__agyCtxRing && typeof window.__agyCtxRing.unmount === 'function') {
     try { window.__agyCtxRing.unmount(); } catch (e) {}
   }
-  var legacyPill = document.getElementById('agy-ctx-ring-pill');
-  if (legacyPill) legacyPill.remove();
+  var legacyNodes = document.querySelectorAll('#agy-ctx-ring-bar, .agy-ctx-ring-bar, #agy-ctx-ring-pill');
+  for (var li = 0; li < legacyNodes.length; li++) {
+    legacyNodes[li].remove();
+  }
 
   var SVG_GAUGE = '<svg class="acr-ico" viewBox="0 0 16 16" fill="none">' +
     '<path d="M3.1 12.2A6 6 0 1 1 12.9 12.2" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>' +
@@ -550,8 +554,9 @@ export function buildInjectedScript() {
   }
 
   var STYLE_ID = 'agy-ctx-ring-style';
-  var BAR_ID = 'agy-ctx-ring-bar';
+  var BAR_CLASS = 'agy-ctx-ring-bar';
   var POP_ID = 'agy-ctx-ring-pop';
+  var CONV_ID_RE = /^[0-9a-f-]{8,}$/i;
 
   var styleEl = document.getElementById(STYLE_ID);
   if (!styleEl) {
@@ -617,21 +622,19 @@ export function buildInjectedScript() {
   var metricsCache = Object.create(null);
   metricsCache[''] = EMPTY_METRICS;
   var state = {
-    metrics: null,
-    currentConvId: null,
     metricsCache: metricsCache,
-    lastBarRenderKey: '',
+    panes: new Map(),
+    paneByFooter: new WeakMap(),
+    activePane: null,
     activePanel: null, // 'session' | 'tokens' | 'context' | null
-    barEl: null,
-    btns: {},
     observer: null,
     resizeObserver: null,
-    observedFooter: null,
     mountQueued: false,
+    lastNotifiedSig: '',
   };
 
   function getActiveBtn() {
-    return state.activePanel ? state.btns[state.activePanel] : null;
+    return state.activePane && state.activePanel ? state.activePane.btns[state.activePanel] : null;
   }
 
   function positionPopover() {
@@ -639,20 +642,28 @@ export function buildInjectedScript() {
     if (!btn || !btn.isConnected) return;
     var rect = btn.getBoundingClientRect();
     var popW = popEl.offsetWidth || 296;
+    var popH = popEl.offsetHeight || 220;
     var left;
     if (state.activePanel === 'session') {
       left = Math.min(window.innerWidth - popW - 10, Math.max(10, rect.left));
     } else {
       left = Math.min(window.innerWidth - popW - 10, Math.max(10, rect.right - popW));
     }
-    var bottom = Math.max(10, window.innerHeight - rect.top + 8);
+    var spaceAbove = rect.top - 10;
+    var spaceBelow = window.innerHeight - rect.bottom - 10;
+    var top;
+    if (spaceAbove < popH + 8 && spaceBelow > spaceAbove) {
+      top = Math.max(10, Math.min(window.innerHeight - popH - 10, rect.bottom + 8));
+    } else {
+      top = Math.max(10, rect.top - popH - 8);
+    }
     popEl.style.left = left + 'px';
-    popEl.style.bottom = bottom + 'px';
-    popEl.style.top = 'auto';
+    popEl.style.top = top + 'px';
+    popEl.style.bottom = 'auto';
   }
 
   function renderPopover() {
-    var data = state.metrics || EMPTY_METRICS;
+    var data = (state.activePane && state.activePane.metrics) || EMPTY_METRICS;
     if (state.activePanel === 'session') {
       popEl.innerHTML = renderSessionPop(data);
     } else if (state.activePanel === 'tokens') {
@@ -664,15 +675,20 @@ export function buildInjectedScript() {
 
   function syncPopoverVisibility() {
     var panels = ['session', 'tokens', 'context'];
-    for (var i = 0; i < panels.length; i++) {
-      var k = panels[i];
-      var b = state.btns[k];
-      if (!b) continue;
-      if (state.activePanel === k) b.setAttribute('data-open', 'true');
-      else b.removeAttribute('data-open');
-    }
+    state.panes.forEach(function (pane) {
+      for (var i = 0; i < panels.length; i++) {
+        var k = panels[i];
+        var b = pane.btns[k];
+        if (!b) continue;
+        if (pane === state.activePane && state.activePanel === k) {
+          b.setAttribute('data-open', 'true');
+        } else {
+          b.removeAttribute('data-open');
+        }
+      }
+    });
     var btn = getActiveBtn();
-    if (state.activePanel && btn && btn.isConnected) {
+    if (state.activePane && state.activePanel && btn && btn.isConnected) {
       renderPopover();
       popEl.classList.add('is-visible');
       positionPopover();
@@ -681,9 +697,9 @@ export function buildInjectedScript() {
     }
   }
 
-  function renderBar() {
-    if (!state.barEl) return;
-    var m = state.metrics;
+  function renderBarForPane(pane) {
+    if (!pane || !pane.barEl) return;
+    var m = pane.metrics;
 
     // 1. Session button
     var hasTps = Boolean(m && Number.isFinite(m.decodeTps) && m.decodeTps > 0);
@@ -706,12 +722,12 @@ export function buildInjectedScript() {
     var pctTxt = m ? (Math.round(pct) + '%') : '0%';
 
     var renderKey = sessionText + '\\n' + tokText + '\\n' + pctTxt + '\\n' + tierId + '\\n' + (active > 0 ? active.toFixed(2) : '0');
-    if (renderKey === state.lastBarRenderKey) return;
-    state.lastBarRenderKey = renderKey;
+    if (renderKey === pane.lastBarRenderKey) return;
+    pane.lastBarRenderKey = renderKey;
 
-    state.btns.session.innerHTML = SVG_GAUGE + '<span>' + sessionText + '</span>';
-    state.btns.tokens.innerHTML = SVG_DB + '<span>' + tokText + '</span>';
-    state.btns.context.innerHTML =
+    pane.btns.session.innerHTML = SVG_GAUGE + '<span>' + sessionText + '</span>';
+    pane.btns.tokens.innerHTML = SVG_DB + '<span>' + tokText + '</span>';
+    pane.btns.context.innerHTML =
       '<svg class="acr-ico" viewBox="0 0 16 16">' +
         '<g transform="rotate(-90 8 8)">' +
           '<circle class="acr-bar-track" cx="8" cy="8" r="' + r + '" fill="none" stroke-width="2"/>' +
@@ -736,40 +752,64 @@ export function buildInjectedScript() {
     return Boolean(el.closest('[data-side-panel-composer], [data-testid="side-question-tab-content"], [data-testid="subagent-tab-composer"]'));
   }
 
-  function findMountAnchor() {
+  function findMountAnchors() {
+    var anchors = [];
+    var coveredFooters = new Set();
     var triggers = document.querySelectorAll('[data-testid="permissions-selector-trigger"]');
     for (var i = 0; i < triggers.length; i++) {
       var trg = triggers[i];
       if (!isExcludedComposer(trg) && isVisible(trg)) {
-        return { kind: 'before', anchor: trg, footer: trg.closest('.agy-composer-footer') };
+        var ft = trg.closest('.agy-composer-footer');
+        if (ft) coveredFooters.add(ft);
+        anchors.push({
+          keyEl: ft || trg,
+          kind: 'before',
+          anchor: trg,
+          footer: ft,
+        });
       }
     }
     var footers = document.querySelectorAll('.agy-composer-footer');
     for (var j = 0; j < footers.length; j++) {
-      var ft = footers[j];
-      if (!isExcludedComposer(ft) && isVisible(ft)) {
-        var right = ft.lastElementChild || ft;
-        return { kind: 'prepend', anchor: right, footer: ft };
+      var f = footers[j];
+      if (!coveredFooters.has(f) && !isExcludedComposer(f) && isVisible(f)) {
+        var right = f.lastElementChild || f;
+        anchors.push({
+          keyEl: f,
+          kind: 'prepend',
+          anchor: right,
+          footer: f,
+        });
       }
     }
-    return null;
+    return anchors;
   }
 
-  function syncResponsiveLayout(footerEl) {
-    if (!state.barEl) return;
-    var ft = footerEl || state.barEl.closest('.agy-composer-footer');
+  function syncResponsiveLayoutForPane(pane) {
+    if (!pane || !pane.barEl) return;
+    var ft = pane.footerEl || pane.barEl.closest('.agy-composer-footer');
     var w = ft ? ft.getBoundingClientRect().width : window.innerWidth;
     if (!w || w <= 0) return;
     if (w >= 740) {
-      state.barEl.removeAttribute('data-compact');
+      pane.barEl.removeAttribute('data-compact');
     } else if (w >= 540) {
-      state.barEl.setAttribute('data-compact', 'md');
+      pane.barEl.setAttribute('data-compact', 'md');
     } else {
-      state.barEl.setAttribute('data-compact', 'sm');
+      pane.barEl.setAttribute('data-compact', 'sm');
     }
   }
 
-  function makeSegBtn(panelName, label) {
+  function ensureResizeObserver() {
+    if (state.resizeObserver || typeof ResizeObserver !== 'function') return;
+    state.resizeObserver = new ResizeObserver(function (entries) {
+      for (var i = 0; i < entries.length; i++) {
+        var pane = state.paneByFooter.get(entries[i].target);
+        if (pane) syncResponsiveLayoutForPane(pane);
+      }
+    });
+  }
+
+  function makeSegBtn(pane, panelName, label) {
     var btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'acr-seg-btn';
@@ -777,111 +817,213 @@ export function buildInjectedScript() {
     btn.setAttribute('aria-label', label);
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
-      state.activePanel = state.activePanel === panelName ? null : panelName;
+      if (state.activePane === pane && state.activePanel === panelName) {
+        state.activePanel = null;
+        state.activePane = null;
+      } else {
+        state.activePane = pane;
+        state.activePanel = panelName;
+      }
       syncPopoverVisibility();
     });
     return btn;
   }
 
-  function ensureBarMounted() {
-    var target = findMountAnchor();
-    if (!target) return false;
-    if (!state.barEl) {
-      var bar = document.createElement('div');
-      bar.id = BAR_ID;
-      state.btns.session = makeSegBtn('session', '会话统计');
-      state.btns.tokens = makeSegBtn('tokens', 'Token 用量');
-      state.btns.context = makeSegBtn('context', '上下文窗口');
-      bar.appendChild(state.btns.session);
-      bar.appendChild(state.btns.tokens);
-      bar.appendChild(state.btns.context);
-      state.barEl = bar;
-      renderBar();
-    }
-    if (target.kind === 'before') {
-      if (state.barEl.nextElementSibling !== target.anchor || state.barEl.parentNode !== target.anchor.parentNode) {
-        target.anchor.insertAdjacentElement('beforebegin', state.barEl);
-      }
-    } else if (state.barEl.parentNode !== target.anchor) {
-      target.anchor.insertBefore(state.barEl, target.anchor.firstChild);
-    }
-    syncActiveConversation(true);
-    if (target.footer && state.observedFooter !== target.footer && typeof ResizeObserver === 'function') {
-      if (!state.resizeObserver) {
-        state.resizeObserver = new ResizeObserver(function () {
-          syncResponsiveLayout(state.observedFooter);
-        });
-      } else {
-        state.resizeObserver.disconnect();
-      }
-      state.observedFooter = target.footer;
-      state.resizeObserver.observe(target.footer);
-    }
-    syncResponsiveLayout(target.footer);
-    return true;
+  function createPane(target) {
+    var pane = {
+      keyEl: target.keyEl,
+      footerEl: target.footer || null,
+      anchorEl: target.anchor,
+      kind: target.kind,
+      barEl: null,
+      btns: {},
+      convId: null,
+      metrics: EMPTY_METRICS,
+      lastBarRenderKey: '',
+    };
+    var bar = document.createElement('div');
+    bar.className = BAR_CLASS;
+    pane.btns.session = makeSegBtn(pane, 'session', '会话统计');
+    pane.btns.tokens = makeSegBtn(pane, 'tokens', 'Token 用量');
+    pane.btns.context = makeSegBtn(pane, 'context', '上下文窗口');
+    bar.appendChild(pane.btns.session);
+    bar.appendChild(pane.btns.tokens);
+    bar.appendChild(pane.btns.context);
+    pane.barEl = bar;
+    renderBarForPane(pane);
+    return pane;
   }
 
-  function extractConversationId() {
-    var m = (window.location.pathname || '').match(/\\/c\\/([0-9a-f-]{36})/i);
-    if (m) return m[1];
-    var ownerView = state.barEl && state.barEl.closest('[data-testid="conversation-view"]');
-    if (ownerView && isVisible(ownerView)) {
-      for (var k in ownerView) {
-        if (k.startsWith('__reactFiber$') || k.startsWith('__reactProps$')) {
-          var node = ownerView[k];
-          for (var step = 0; step < 30 && node; step++) {
-            var p = node.memoizedProps || node.pendingProps;
-            if (p && typeof p.conversationId === 'string' && p.conversationId.length >= 8) {
+  function extractIdFromFiber(el) {
+    if (!el) return '';
+    for (var k in el) {
+      if (k.startsWith('__reactFiber$') || k.startsWith('__reactProps$')) {
+        var node = el[k];
+        for (var step = 0; step < 45 && node; step++) {
+          var p = node.memoizedProps || node.pendingProps;
+          if (p) {
+            if (typeof p.conversationId === 'string' && CONV_ID_RE.test(p.conversationId)) {
               return p.conversationId;
             }
-            node = node.return;
+            if (typeof p.cascadeId === 'string' && CONV_ID_RE.test(p.cascadeId)) {
+              return p.cascadeId;
+            }
           }
+          node = node.return;
         }
       }
     }
     return '';
   }
 
-  function notifyHost(cid) {
+  function extractConversationIdForPane(pane, totalPanes) {
+    var viewEl = pane.footerEl && pane.footerEl.closest('[data-testid="conversation-view"]');
+    var cid = extractIdFromFiber(viewEl);
+    if (cid) return cid;
+    cid = extractIdFromFiber(pane.anchorEl);
+    if (cid) return cid;
+    cid = extractIdFromFiber(pane.footerEl);
+    if (cid) return cid;
+    if (totalPanes === 1) {
+      var path = window.location.pathname || '';
+      if (path.indexOf('+') === -1 && path.indexOf('%2B') === -1 && path.indexOf('%2b') === -1) {
+        var m = path.match(/\\/c\\/([0-9a-f-]{36})(?:$|\\/)/i);
+        if (m) return m[1];
+      }
+    }
+    return '';
+  }
+
+  function notifyHost(sig) {
     if (typeof window.__agyCtxRingNotify === 'function') {
-      try { window.__agyCtxRingNotify(String(cid || '')); } catch (e) {}
+      try { window.__agyCtxRingNotify(String(sig || '')); } catch (e) {}
     }
   }
 
-  function syncActiveConversation(shouldNotify) {
-    var cid = extractConversationId();
-    if (cid === state.currentConvId) return false;
-    state.currentConvId = cid;
-    var cached = cid ? state.metricsCache[cid] : EMPTY_METRICS;
-    state.metrics = cached || EMPTY_METRICS;
-    renderBar();
-    if (state.activePanel) {
-      renderPopover();
-      positionPopover();
+  function syncAllPanes(shouldNotify) {
+    var anchors = findMountAnchors();
+    var activeKeys = new Set();
+    for (var i = 0; i < anchors.length; i++) {
+      activeKeys.add(anchors[i].keyEl);
     }
-    if (shouldNotify !== false) notifyHost(cid);
-    return true;
+
+    var toRemove = [];
+    state.panes.forEach(function (pane, keyEl) {
+      if (!activeKeys.has(keyEl) || !keyEl.isConnected) {
+        toRemove.push(keyEl);
+      }
+    });
+    for (var r = 0; r < toRemove.length; r++) {
+      var staleKey = toRemove[r];
+      var stalePane = state.panes.get(staleKey);
+      if (stalePane) {
+        if (stalePane.footerEl && state.resizeObserver) {
+          try { state.resizeObserver.unobserve(stalePane.footerEl); } catch (e) {}
+          state.paneByFooter.delete(stalePane.footerEl);
+        }
+        if (stalePane.barEl) stalePane.barEl.remove();
+        if (state.activePane === stalePane) {
+          state.activePane = null;
+          state.activePanel = null;
+          syncPopoverVisibility();
+        }
+      }
+      state.panes.delete(staleKey);
+    }
+
+    var convIds = [];
+    var seenConv = new Set();
+    var totalPanes = anchors.length;
+
+    for (var j = 0; j < anchors.length; j++) {
+      var target = anchors[j];
+      var pane = state.panes.get(target.keyEl);
+      if (!pane) {
+        pane = createPane(target);
+        state.panes.set(target.keyEl, pane);
+      } else {
+        if (pane.footerEl !== (target.footer || null)) {
+          if (pane.footerEl && state.resizeObserver) {
+            try { state.resizeObserver.unobserve(pane.footerEl); } catch (e) {}
+            state.paneByFooter.delete(pane.footerEl);
+          }
+          pane.footerEl = target.footer || null;
+        }
+        pane.anchorEl = target.anchor;
+        pane.kind = target.kind;
+      }
+
+      if (target.kind === 'before') {
+        if (pane.barEl.nextElementSibling !== target.anchor || pane.barEl.parentNode !== target.anchor.parentNode) {
+          target.anchor.insertAdjacentElement('beforebegin', pane.barEl);
+        }
+      } else if (pane.barEl.parentNode !== target.anchor) {
+        target.anchor.insertBefore(pane.barEl, target.anchor.firstChild);
+      }
+
+      if (pane.footerEl) {
+        ensureResizeObserver();
+        if (state.resizeObserver && state.paneByFooter.get(pane.footerEl) !== pane) {
+          state.paneByFooter.set(pane.footerEl, pane);
+          state.resizeObserver.observe(pane.footerEl);
+        }
+      }
+      syncResponsiveLayoutForPane(pane);
+
+      var cid = extractConversationIdForPane(pane, totalPanes);
+      if (cid !== pane.convId) {
+        pane.convId = cid;
+        pane.metrics = (cid && state.metricsCache[cid]) || EMPTY_METRICS;
+        renderBarForPane(pane);
+        if (state.activePane === pane && state.activePanel) {
+          renderPopover();
+          positionPopover();
+        }
+      }
+
+      if (cid && !seenConv.has(cid)) {
+        seenConv.add(cid);
+        convIds.push(cid);
+      }
+    }
+
+    var sig = convIds.join(',');
+    if (shouldNotify !== false && sig !== state.lastNotifiedSig) {
+      state.lastNotifiedSig = sig;
+      notifyHost(sig);
+    }
+    return convIds;
   }
 
   function onDocClick(e) {
     if (!state.activePanel) return;
-    if (popEl.contains(e.target) || (state.barEl && state.barEl.contains(e.target))) return;
+    if (popEl.contains(e.target)) return;
+    var insideAnyBar = false;
+    state.panes.forEach(function (pane) {
+      if (pane.barEl && pane.barEl.contains(e.target)) {
+        insideAnyBar = true;
+      }
+    });
+    if (insideAnyBar) return;
     state.activePanel = null;
+    state.activePane = null;
     syncPopoverVisibility();
   }
   function onKeyDown(e) {
     if (e.key === 'Escape' && state.activePanel) {
       state.activePanel = null;
+      state.activePane = null;
       syncPopoverVisibility();
     }
   }
   function onResize() {
-    syncResponsiveLayout();
+    state.panes.forEach(function (pane) {
+      syncResponsiveLayoutForPane(pane);
+    });
     if (state.activePanel) positionPopover();
   }
   function onRouteChange() {
-    syncActiveConversation(true);
-    ensureBarMounted();
+    syncAllPanes(true);
   }
 
   var navApi = window.navigation && typeof window.navigation.addEventListener === 'function'
@@ -902,21 +1044,21 @@ export function buildInjectedScript() {
     state.mountQueued = true;
     scheduleMicro(function () {
       state.mountQueued = false;
-      syncActiveConversation(true);
-      ensureBarMounted();
+      syncAllPanes(true);
     });
   });
   state.observer.observe(document.body, { childList: true, subtree: true });
-  ensureBarMounted();
+  syncAllPanes(true);
 
   window.__agyCtxRing = {
     version: VERSION,
     getContext: function () {
-      var mounted = ensureBarMounted();
-      var cid = extractConversationId();
+      var convIds = syncAllPanes(false);
       return {
-        conversationId: cid,
-        mounted: Boolean(mounted && state.barEl && state.barEl.isConnected),
+        conversationId: convIds[0] || '',
+        conversationIds: convIds,
+        mounted: state.panes.size > 0,
+        mountedCount: state.panes.size,
         cacheSize: Object.keys(state.metricsCache).length,
         hasBinding: typeof window.__agyCtxRingNotify === 'function',
       };
@@ -931,33 +1073,49 @@ export function buildInjectedScript() {
           }
         }
       }
-      var cid = extractConversationId();
-      state.currentConvId = cid;
-      if (cid && state.metricsCache[cid] && (!state.metrics || state.metrics === EMPTY_METRICS)) {
-        state.metrics = state.metricsCache[cid];
-        renderBar();
-        if (state.activePanel) {
-          renderPopover();
-          positionPopover();
+      var activeUpdated = false;
+      state.panes.forEach(function (pane) {
+        if (pane.convId && state.metricsCache[pane.convId] && (!pane.metrics || pane.metrics === EMPTY_METRICS)) {
+          pane.metrics = state.metricsCache[pane.convId];
+          renderBarForPane(pane);
+          if (pane === state.activePane && state.activePanel) activeUpdated = true;
         }
+      });
+      if (activeUpdated) {
+        renderPopover();
+        positionPopover();
+      }
+    },
+    updateMany: function (map) {
+      if (!map || typeof map !== 'object') return;
+      for (var id in map) {
+        if (Object.prototype.hasOwnProperty.call(map, id) && map[id]) {
+          state.metricsCache[id] = map[id];
+        }
+      }
+      syncAllPanes(false);
+      var activeUpdated = false;
+      state.panes.forEach(function (pane) {
+        var nextMetrics = pane.convId
+          ? (state.metricsCache[pane.convId] || pane.metrics || EMPTY_METRICS)
+          : EMPTY_METRICS;
+        if (!pane.convId || Object.prototype.hasOwnProperty.call(map, pane.convId) || pane.metrics !== nextMetrics) {
+          pane.metrics = nextMetrics;
+          renderBarForPane(pane);
+          if (pane === state.activePane && state.activePanel) activeUpdated = true;
+        }
+      });
+      if (activeUpdated) {
+        renderPopover();
+        positionPopover();
       }
     },
     update: function (metrics) {
       var m = metrics || EMPTY_METRICS;
       var cid = m.conversationId || '';
-      if (metrics) {
-        state.metricsCache[cid] = m;
-      }
-      var activeCid = extractConversationId();
-      state.currentConvId = activeCid;
-      ensureBarMounted();
-      if (cid !== activeCid) return;
-      state.metrics = m;
-      renderBar();
-      if (state.activePanel) {
-        renderPopover();
-        positionPopover();
-      }
+      var map = Object.create(null);
+      map[cid] = m;
+      window.__agyCtxRing.updateMany(map);
     },
     unmount: function () {
       try { state.observer && state.observer.disconnect(); } catch (e) {}
@@ -968,9 +1126,15 @@ export function buildInjectedScript() {
       document.removeEventListener('click', onDocClick, true);
       document.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('resize', onResize);
-      if (state.barEl) state.barEl.remove();
-      var oldPill = document.getElementById('agy-ctx-ring-pill');
-      if (oldPill) oldPill.remove();
+
+      state.panes.forEach(function (pane) {
+        if (pane.barEl) pane.barEl.remove();
+      });
+      state.panes.clear();
+      var leftover = document.querySelectorAll('#agy-ctx-ring-bar, .agy-ctx-ring-bar, #agy-ctx-ring-pill');
+      for (var i = 0; i < leftover.length; i++) {
+        leftover[i].remove();
+      }
       popEl.remove();
       styleEl.remove();
       delete window.__agyCtxRing;

@@ -6,7 +6,7 @@
 
 **Zero-patch native composer HUD & click popovers for Antigravity — session stats, token usage, and native context breakdown.**
 
-[![Release](https://img.shields.io/badge/release-v1.2.9-d97706?style=flat-square)](https://github.com/XMT-CN/agy-ctx-ring/releases/latest)
+[![Release](https://img.shields.io/badge/release-v1.2.10-d97706?style=flat-square)](https://github.com/XMT-CN/agy-ctx-ring/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-16a34a?style=flat-square)](#architecture--privacy)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-52525b?style=flat-square)](#quick-start)
@@ -42,6 +42,7 @@ Clicking any of the three segments opens a compact floating popover right above 
 - **Zero-Patch Upgrade Survival**: Never modifies `Antigravity.app`, `app.asar`, or `~/.gemini/config/config.json`. Installed cleanly under `~/.gemini/config/plugins/agy-ctx-ring/` so official Antigravity updates never wipe your HUD.
 - **API Ground-Truth Prompt Usage & Native Breakdown**: Tracks server-returned prompt tokens (`uncached input + cache read`, aligned with Antigravity's actual compaction trigger) and scales the 5-category breakdown from Antigravity's native `gen_metadata` context tree (`ctx[3]`), isolating subagent / plan handoff `SYSTEM_MESSAGE` payloads from static system rules (with full-transcript `transcript_full.jsonl` fallback).
 - **Subagent & Swarm Token Aggregation**: Recursively discovers descendant conversations via `conversation_summaries.db` (`parent_conversation_id` & `conversation_parents`), aggregates cumulative token usage and cache hit rate across main + all subagent/Swarm runs, deduplicates cloned Fork `/btw` `gen_metadata` rows via `sha256` `blobHash`, and keeps the main context window percentage unpolluted.
+- **Multi-Pane & Multi-Window HUD**: Supports split-grid multi-pane views and multiple workbench windows simultaneously; mounts an independent `.agy-ctx-ring-bar` per visible pane, resolves each pane's `conversationId`/`cascadeId` directly from its React Fiber tree to prevent cross-talk, adapts compact widths independently per footer, and flips click popovers downward automatically when top panes lack space above.
 - **Zero-Latency Session Switching**:
   - Preloads the 40 most recent conversations into browser memory on attach;
   - Hooks Chromium `window.navigation` (`currententrychange`), `popstate`, and a `queueMicrotask` `MutationObserver` to re-render in the same paint frame (~0 ms);
