@@ -158,7 +158,7 @@ class CdpSession {
   }
 }
 
-function computeMetricsSig(metrics) {
+export function computeMetricsSig(metrics) {
   return JSON.stringify({
     c: metrics.conversationId,
     u: metrics.usedTokens,

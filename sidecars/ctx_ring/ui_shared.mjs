@@ -338,7 +338,7 @@ const BAR_AND_POP_CSS = `
 
 export function buildInjectedScript() {
   return `(function () {
-  var VERSION = '1.2.10';
+  var VERSION = '1.2.11';
   if (window.__agyCtxRing && window.__agyCtxRing.version === VERSION) {
     return { status: 'already_mounted', version: VERSION };
   }

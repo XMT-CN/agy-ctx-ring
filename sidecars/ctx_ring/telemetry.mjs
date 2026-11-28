@@ -20,6 +20,7 @@ const SUMMARIES_DB = join(AGY_ROOT, 'conversation_summaries.db');
 
 export const ID_RE = /^[0-9a-f-]{8,}$/i;
 const DEFAULT_LIMIT = 512000;
+const CHARS_PER_TOKEN = 2.4;
 
 const STEP_USER_INPUT = 14;
 const STEP_PLANNER_RESPONSE = 15;
@@ -33,6 +34,8 @@ const CTX_PARENT_WANT = new Set([1, 10]);
 const CTX_WANT = new Set([1, 3, 4]);
 const DUR_WANT = new Set([1, 2]);
 const STEP_TIME_WANT = new Set([1, 8, 32]);
+const CP_TOP_WANT = new Set([30]);
+const CP_BODY_WANT = new Set([5]);
 
 const dbCache = new Map();
 const transcriptCache = new Map();
@@ -474,14 +477,14 @@ function formatNativeBreakdown(native, usedTokens) {
   };
 }
 
-export function readTranscriptBreakdown(conversationId, usedTokens, hints = {}) {
+export function readTranscriptBreakdown(conversationId, usedTokens, hints = {}, brainDir = BRAIN_DIR) {
   const empty = {
     compacted: false,
     items: buildBreakdownItems([usedTokens, 0, 0, 0, 0], usedTokens),
   };
 
   if (!conversationId || !ID_RE.test(conversationId)) return empty;
-  const logsDir = join(BRAIN_DIR, conversationId, '.system_generated', 'logs');
+  const logsDir = join(brainDir, conversationId, '.system_generated', 'logs');
   const fullPath = join(logsDir, 'transcript_full.jsonl');
   const compactPath = join(logsDir, 'transcript.jsonl');
   const logPath = existsSync(fullPath) ? fullPath : compactPath;
@@ -550,7 +553,6 @@ export function readTranscriptBreakdown(conversationId, usedTokens, hints = {}) 
     return { ...empty, compacted: parsed.compacted };
   }
 
-  const CHARS_PER_TOKEN = 2.4;
   const injectedEst = Math.round(parsed.injectedChars / CHARS_PER_TOKEN);
   const toolsEst = Math.round(parsed.toolsChars / CHARS_PER_TOKEN);
   const replyEst = Math.round(parsed.replyChars / CHARS_PER_TOKEN);
@@ -571,8 +573,8 @@ export function readTranscriptBreakdown(conversationId, usedTokens, hints = {}) 
   };
 }
 
-function readDbRowsCached(conversationId) {
-  const dbPath = join(CONVERSATIONS_DIR, `${conversationId}.db`);
+function readDbRowsCached(conversationId, conversationsDir = CONVERSATIONS_DIR) {
+  const dbPath = join(conversationsDir, `${conversationId}.db`);
   const st = statSafe(dbPath);
   if (!st) return null;
 
@@ -593,7 +595,16 @@ function readDbRowsCached(conversationId) {
       gmRows = db.prepare('SELECT idx, data FROM gen_metadata ORDER BY idx ASC').all();
     }
     if (tables.has('steps')) {
-      stepRows = db.prepare('SELECT step_type, metadata FROM steps').all();
+      const stepCols = new Set(
+        db.prepare('PRAGMA table_info(steps)').all().map((c) => c.name)
+      );
+      const idxExpr = stepCols.has('idx') ? 'idx' : 'rowid AS idx';
+      const payloadExpr = stepCols.has('step_payload')
+        ? ', CASE WHEN step_type = 23 THEN step_payload ELSE NULL END AS step_payload'
+        : '';
+      stepRows = db
+        .prepare(`SELECT ${idxExpr}, step_type, metadata${payloadExpr} FROM steps`)
+        .all();
     }
   } catch {
     return cached?.data || null;
@@ -609,6 +620,7 @@ function readDbRowsCached(conversationId) {
   let latestInput = 0;
   let latestCacheRead = 0;
   let latestCtx3Buf = null;
+  let lastAnyCtx3Buf = null;
   let firstHeaderTokens = 0;
   let lastCpStart = 0;
   let compactedCount = 0;
@@ -664,6 +676,7 @@ function readDbRowsCached(conversationId) {
       compactedCount += 1;
       lastCpStart = cpStart;
       thinkingSinceCompaction = 0;
+      latestCtx3Buf = null;
     }
     thinkingSinceCompaction += thinkingOut;
 
@@ -674,6 +687,7 @@ function readDbRowsCached(conversationId) {
     }
     if (ctx[3] && ctx[3].length > 0) {
       latestCtx3Buf = ctx[3];
+      lastAnyCtx3Buf = ctx[3];
     }
 
     if (input + cacheRead > 0 || output > 0) {
@@ -734,6 +748,8 @@ function readDbRowsCached(conversationId) {
   let plannerSteps = 0;
   let toolSteps = 0;
   let checkpointSteps = 0;
+  let lastCheckpointIdx = -1;
+  let lastCheckpointSummaryChars = 0;
   const toolIntervals = [];
 
   for (const s of stepRows) {
@@ -743,6 +759,17 @@ function readDbRowsCached(conversationId) {
       plannerSteps += 1;
     } else if (s.step_type === STEP_CHECKPOINT) {
       checkpointSteps += 1;
+      const cpIdx = Number(s.idx);
+      if (Number.isFinite(cpIdx) && cpIdx > lastCheckpointIdx) {
+        lastCheckpointIdx = cpIdx;
+        if (s.step_payload && s.step_payload.length > 0) {
+          const cpTop = readFields(s.step_payload, CP_TOP_WANT);
+          const cpBody = cpTop[30] ? readFields(cpTop[30], CP_BODY_WANT) : {};
+          lastCheckpointSummaryChars = cpBody[5] ? decodeUtf8(cpBody[5]).length : 0;
+        } else {
+          lastCheckpointSummaryChars = 0;
+        }
+      }
     } else if (s.step_type === STEP_TOOL_GENERIC) {
       toolSteps += 1;
       if (s.metadata) {
@@ -756,6 +783,40 @@ function readDbRowsCached(conversationId) {
     }
   }
   compactedCount = Math.max(compactedCount, checkpointSteps);
+
+  const lastAnyNative = lastAnyCtx3Buf ? decodeNativeBreakdown(lastAnyCtx3Buf) : null;
+  const lastSystemTokens = lastAnyNative ? lastAnyNative.systemTok : 0;
+  let nativeBreakdown = latestCtx3Buf
+    ? (latestCtx3Buf === lastAnyCtx3Buf ? lastAnyNative : decodeNativeBreakdown(latestCtx3Buf))
+    : null;
+
+  const isPostCompactPending = checkpointSteps > 0 && lastCheckpointIdx > lastCpStart;
+  if (isPostCompactPending) {
+    latestCtx3Buf = null;
+    thinkingSinceCompaction = 0;
+    const limit = latestLimitTokens || DEFAULT_LIMIT;
+    const systemBase =
+      lastSystemTokens > 0
+        ? lastSystemTokens
+        : firstHeaderTokens > 0
+          ? Math.min(firstHeaderTokens, 35000)
+          : 30000;
+    const summaryEst = Math.round(lastCheckpointSummaryChars / CHARS_PER_TOKEN);
+    latestUsedTokens = Math.min(limit, systemBase + summaryEst);
+    latestInput = 0;
+    latestCacheRead = 0;
+    lastCacheColdStart = false;
+    lastCacheColdReason = '';
+    nativeBreakdown = {
+      total: systemBase + summaryEst,
+      systemTok: systemBase,
+      injectedTok: summaryEst,
+      toolsTok: 0,
+      modelTok: 0,
+      userTok: 0,
+      compacted: true,
+    };
+  }
 
   const steps = plannerSteps + toolSteps;
   const toolTimeSec = sumMergedIntervals(toolIntervals);
@@ -773,8 +834,6 @@ function readDbRowsCached(conversationId) {
   const cumTotalIn = totalUncachedInput + totalCacheRead;
   const cumCachePct = cumTotalIn > 0 ? (totalCacheRead / cumTotalIn) * 100 : null;
   const totalTokens = totalUncachedInput + totalCacheRead + totalOutput;
-
-  const nativeBreakdown = latestCtx3Buf ? decodeNativeBreakdown(latestCtx3Buf) : null;
 
   const data = {
     usedTokens: latestUsedTokens,
@@ -801,6 +860,7 @@ function readDbRowsCached(conversationId) {
     requestCount,
     nativeBreakdown,
     firstHeaderTokens,
+    lastSystemTokens,
     thinkingSinceCompaction,
     compactedCount,
     lastCacheColdStart,
@@ -816,12 +876,15 @@ function readDbRowsCached(conversationId) {
   return data;
 }
 
-export function readConversationMetrics(conversationId, { fallbackToRecent = false } = {}) {
+export function readConversationMetrics(
+  conversationId,
+  { fallbackToRecent = false, conversationsDir = CONVERSATIONS_DIR, brainDir = BRAIN_DIR } = {}
+) {
   const clean = typeof conversationId === 'string' ? conversationId.trim() : '';
   const resolvedId = fallbackToRecent
     ? resolveConversationId(clean)
     : (ID_RE.test(clean) ? clean : '');
-  const raw = resolvedId ? readDbRowsCached(resolvedId) : null;
+  const raw = resolvedId ? readDbRowsCached(resolvedId, conversationsDir) : null;
 
   const mainUncached = raw?.totalUncachedInput || 0;
   const mainCacheRead = raw?.totalCacheRead || 0;
@@ -835,7 +898,7 @@ export function readConversationMetrics(conversationId, { fallbackToRecent = fal
   let subagentOutput = 0;
   let subagentRequestCount = 0;
 
-  if (resolvedId && raw) {
+  if (resolvedId && raw && conversationsDir === CONVERSATIONS_DIR) {
     const seenHashes = new Set();
     for (const c of raw.calls || []) {
       if (c.blobHash) seenHashes.add(c.blobHash);
@@ -843,7 +906,7 @@ export function readConversationMetrics(conversationId, { fallbackToRecent = fal
 
     const descendantIds = getDescendantConversationIds(resolvedId);
     for (const childId of descendantIds) {
-      const childRaw = readDbRowsCached(childId);
+      const childRaw = readDbRowsCached(childId, conversationsDir);
       if (!childRaw || !Array.isArray(childRaw.calls) || childRaw.calls.length === 0) continue;
 
       let cUn = 0;
@@ -889,10 +952,15 @@ export function readConversationMetrics(conversationId, { fallbackToRecent = fal
   const breakdown =
     raw?.nativeBreakdown && usedTokens > 0
       ? formatNativeBreakdown(raw.nativeBreakdown, usedTokens)
-      : readTranscriptBreakdown(resolvedId, usedTokens, {
-          initialHeaderTokens: raw?.firstHeaderTokens,
-          thinkingSinceCompaction: raw?.thinkingSinceCompaction,
-        });
+      : readTranscriptBreakdown(
+          resolvedId,
+          usedTokens,
+          {
+            initialHeaderTokens: raw?.lastSystemTokens || raw?.firstHeaderTokens,
+            thinkingSinceCompaction: raw?.thinkingSinceCompaction,
+          },
+          brainDir
+        );
   const compacted = Boolean((raw?.compactedCount || 0) > 0 || breakdown.compacted);
   const compactedCount = raw?.compactedCount || (breakdown.compacted ? 1 : 0);
 
